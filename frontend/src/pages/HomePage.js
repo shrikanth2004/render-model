@@ -67,7 +67,8 @@ const HomePage = () => {
         
         <div className="hero-content">
           <div className="hero-text">
-            <h1 data-testid="hero-title">Plant Disease Detection Using CNN</h1>
+            <h1 data-testid="hero-title">Plant Disease Detection Using CNN
+            </h1>
             <p data-testid="hero-subtitle">
               Leveraging transfer learning and ResNet50 architecture to accurately classify 39 plant diseases, 
               helping farmers protect their crops and ensure food security through AI-powered agricultural technology.
