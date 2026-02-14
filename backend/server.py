@@ -1,4 +1,5 @@
 import os
+os.environ["TF_USE_LEGACY_KERAS"] = "1"
 
 from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ except ImportError:
     tf = None
     load_model = None
 
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 api_router = APIRouter(prefix="/api")
 
 DISEASE_INFO = {}
+
 try:
     csv_path = ROOT_DIR / "disease_info.csv"
     if csv_path.exists():
@@ -56,7 +59,7 @@ try:
                         "image_url": row.get("image_url"),
                     }
 except Exception as e:
-    logger.error(f"Error loading disease_info.csv: {str(e)}")
+    logger.error(f"CSV load error: {e}")
 
 
 class StatusCheck(BaseModel):
@@ -79,8 +82,6 @@ class PredictionResponse(BaseModel):
 
 
 STATUS_STORE: List[dict] = []
-PREDICTIONS_STORE: List[dict] = []
-
 MODEL = None
 MODEL_LOAD_ERROR = None
 CLASS_NAMES: List[str] = []
@@ -107,42 +108,44 @@ def load_keras_model():
     global MODEL, MODEL_LOAD_ERROR
 
     if load_model is None:
-        MODEL_LOAD_ERROR = "TensorFlow/Keras not installed"
+        MODEL_LOAD_ERROR = "TensorFlow not installed"
         logger.error(MODEL_LOAD_ERROR)
         return
 
     model_path = Path(MODEL_FILE)
-    logger.info(f"Loading model from: {model_path.absolute()}")
 
     if not model_path.exists():
-        MODEL_LOAD_ERROR = f"Model file not found: {model_path.absolute()}"
+        MODEL_LOAD_ERROR = f"Model file not found: {model_path}"
         logger.error(MODEL_LOAD_ERROR)
         return
 
     try:
+        tf.keras.backend.clear_session()
+
         MODEL = load_model(
             str(model_path),
             compile=False
         )
+
         MODEL_LOAD_ERROR = None
         logger.info("Model loaded successfully")
 
     except Exception as e:
-        MODEL_LOAD_ERROR = str(e)
         MODEL = None
+        MODEL_LOAD_ERROR = str(e)
         logger.error(f"Model load failed: {e}", exc_info=True)
 
 
-def preprocess_image(contents: bytes) -> np.ndarray:
+def preprocess_image(contents: bytes):
     img = Image.open(BytesIO(contents))
 
     if img.mode != "RGB":
         img = img.convert("RGB")
 
     img = img.resize((INPUT_SIZE, INPUT_SIZE))
-    arr = np.asarray(img).astype("float32")
 
-    arr = arr / 255.0
+    arr = np.asarray(img).astype("float32") / 255.0
+
     arr = np.expand_dims(arr, axis=0)
 
     return arr
@@ -153,24 +156,16 @@ async def root():
     return {"message": "Backend running"}
 
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    obj = StatusCheck(**input.model_dump())
-    STATUS_STORE.append(obj.model_dump())
-    return obj
-
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    return STATUS_STORE
+@api_router.get("/status")
+async def status():
+    return {
+        "model_loaded": MODEL is not None,
+        "error": MODEL_LOAD_ERROR
+    }
 
 
 @api_router.post("/predict", response_model=PredictionResponse)
-async def predict_disease(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(400, "File must be image")
-
-    contents = await file.read()
+async def predict(file: UploadFile = File(...)):
 
     if MODEL is None:
         raise HTTPException(
@@ -178,11 +173,11 @@ async def predict_disease(file: UploadFile = File(...)):
             f"Model not loaded. Reason: {MODEL_LOAD_ERROR}"
         )
 
+    contents = await file.read()
+
     input_arr = preprocess_image(contents)
 
-    preds = MODEL.predict(input_arr)
-
-    preds = preds[0]
+    preds = MODEL.predict(input_arr)[0]
 
     class_idx = int(np.argmax(preds))
     confidence = float(np.max(preds))
@@ -225,5 +220,4 @@ app.add_middleware(
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
