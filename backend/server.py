@@ -18,10 +18,10 @@ import numpy as np
 
 try:
     import tensorflow as tf
-    from tensorflow.keras.applications import imagenet_utils
-    from tensorflow.keras.models import load_model
-    import keras
-
+    import tf_keras as keras
+    from tf_keras.models import load_model
+    from tf_keras.applications import imagenet_utils
+    
     try:
         keras.config.enable_unsafe_deserialization()
     except AttributeError:
@@ -106,7 +106,7 @@ def load_class_names():
 def load_keras_model():
     global MODEL, MODEL_LOAD_ERROR
     if load_model is None:
-        MODEL_LOAD_ERROR = "TensorFlow/Keras not installed."
+        MODEL_LOAD_ERROR = "TensorFlow/tf-keras not installed."
         logger.error(MODEL_LOAD_ERROR)
         return
 
@@ -122,11 +122,9 @@ def load_keras_model():
         MODEL = load_model(
             str(model_path), 
             compile=False, 
-            safe_mode=False,
             custom_objects={"imagenet_utils": imagenet_utils}
         )
-            
-        logger.info("Model loaded successfully")
+        logger.info("Model loaded successfully via tf-keras")
         MODEL_LOAD_ERROR = None
     except Exception as e:
         MODEL_LOAD_ERROR = f"Keras Load Error: {str(e)}"
@@ -138,9 +136,7 @@ def preprocess_image(contents: bytes, input_size: int = INPUT_SIZE) -> np.ndarra
     if img.mode != "RGB":
         img = img.convert("RGB")
     img = img.resize((input_size, input_size), Image.LANCZOS) 
-    
     arr = np.asarray(img).astype("float32") 
-    
     arr = np.expand_dims(arr, axis=0)
     return arr
 
@@ -181,19 +177,10 @@ async def predict_disease(file: UploadFile = File(...)):
             logger.error(detail_msg)
             raise HTTPException(status_code=500, detail=detail_msg)
 
-        try:
-            input_arr = preprocess_image(contents, INPUT_SIZE)
-        except Exception as e:
-            logger.error(f"Image preprocessing error: {e}")
-            raise HTTPException(status_code=400, detail="Error preprocessing image")
-
-        try:
-            preds = MODEL.predict(input_arr)
-        except Exception as e:
-            logger.error(f"Model prediction error: {e}")
-            raise HTTPException(status_code=500, detail="Error during model prediction")
-
+        input_arr = preprocess_image(contents, INPUT_SIZE)
+        preds = MODEL.predict(input_arr)
         preds = np.asarray(preds)
+
         if preds.ndim == 2 and preds.shape[0] == 1:
             preds = preds[0]
         
@@ -251,4 +238,4 @@ app.add_middleware(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=10000)
